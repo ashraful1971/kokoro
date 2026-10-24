@@ -1,0 +1,3 @@
+interface:
+  display_name: "Kokoro TTS"
+  short_description: "Generate local speech with customizable Kokoro voices"

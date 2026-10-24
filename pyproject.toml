@@ -1,0 +1,20 @@
+[project]
+name = "kokoro-tts-skill"
+version = "0.1.0"
+description = "Portable, offline Kokoro speech generation for AI agents"
+requires-python = ">=3.12,<3.13"
+license = "MIT"
+dependencies = [
+  "kokoro-onnx==0.6.1",
+  "numpy>=2.0.2,<3",
+  "onnxruntime>=1.20.1,<2",
+  "espeakng-loader>=0.2.4,<0.3",
+]
+
+[tool.uv]
+package = false
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
