@@ -109,4 +109,20 @@ cloning, SSML, sample-rate selection, or a fixed output duration. Speed and
 voice/style selection influence delivery but cannot promise a precise emotion
 or accent transformation. Audio gain, resampling, MP3 conversion, and timeline
 assembly are separate post-processing tasks. This skill does not install
-FFmpeg or invent engine parameters for them.
+FFmpeg or invent engine parameters for them. If FFmpeg is already available,
+common follow-ups are:
+
+```sh
+ffmpeg -i narration.wav -codec:a libmp3lame -q:a 2 narration.mp3   # MP3
+ffmpeg -i narration.wav -af "volume=1.5" louder.wav                 # gain
+ffmpeg -i narration.wav -ar 44100 narration-44k.wav                 # resample
+```
+
+To join clips, list them in a text file (`file 'a.wav'` per line) and run
+`ffmpeg -f concat -safe 0 -i list.txt -c copy joined.wav`.
+
+Kokoro's voice bundle also contains non-English voices (French, Spanish, Hindi,
+Italian, Portuguese, Japanese, Chinese). They are not exposed
+here because this skill is built and tested for English only; Japanese and
+Chinese would also need extra text-processing packages that are not installed.
+Bengali is not supported by Kokoro.

@@ -283,6 +283,10 @@ def main():
         return subprocess.call([str(python), str(Path(__file__).resolve()), *sys.argv[1:]],
                                env=local_environment())
     configure_runtime()
+    # Windows consoles default to a legacy code page; narration text and JSON paths are UTF-8.
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if stream is not None:
+            stream.reconfigure(encoding="utf-8")
     try:
         run(args)
     except Exception as error:
