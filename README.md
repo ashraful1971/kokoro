@@ -5,6 +5,20 @@ and spoken text. Uses [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)
 through [kokoro-onnx](https://github.com/thewh1teagle/kokoro-onnx).
 No API keys, server, global package installation, or GPU required.
 
+## Install
+
+Install into your project (works with Claude Code, Codex, and other agents
+supported by the [skills CLI](https://github.com/vercel-labs/skills)):
+
+```sh
+npx skills add ashraful1971/kokoro
+```
+
+Then ask your agent: “Use the kokoro skill to narrate this text and save it as
+narration.wav.” On first use the agent runs `scripts/setup.py`, which needs
+[uv](https://docs.astral.sh/uv/), Python 3.10+, and internet access to download
+the model (about 354 MB). To install manually instead, see [Use with agents](#use-with-agents).
+
 ## Quick start
 
 Clone/download this repository into a writable folder named `kokoro`.
