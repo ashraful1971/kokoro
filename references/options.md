@@ -8,6 +8,8 @@ relative to the caller's current directory, not the skill directory.
 | `--text TEXT` | Literal text; mutually exclusive with `--file` |
 | `--file PATH` | UTF-8 input, with optional BOM; otherwise stdin |
 | `--output PATH.wav` | Required for speech; 24 kHz mono 16-bit WAV |
+| `--split paragraph/line` | Speak each blank-line-separated paragraph (or each line) as its own clip; needs `--output-dir` |
+| `--output-dir DIR` | Folder for `--split` clips (`001.wav`, …) and `manifest.json`; replaces `--output` |
 | `--list-voices` | English preset IDs and their default pronunciation, as JSON |
 | `--voice ID` | Preset voice; default `af_heart` |
 | `--voice "ID:WEIGHT,ID:WEIGHT"` | Arbitrary weighted voice blend; weights normalized to sum to one |
@@ -74,6 +76,32 @@ a chunk. With `--no-trim`, these chunk-join pause controls have no effect.
 For pauses at each punctuation mark, use the timing-aware path with
 `--timings-json`. For separately controlled segments, render separate clips
 and assemble them in the tutorial's audio/video workflow.
+
+## One clip per paragraph or line
+
+For tutorials where each step needs its own audio (to time against video), use
+`--split` instead of running the command once per clip. The model loads once and
+every clip uses the same voice and settings.
+
+```sh
+python scripts/speak.py --file tutorial.txt --split paragraph --output-dir outputs/clips
+```
+
+This writes `001.wav`, `002.wav`, … (three digits, more if needed) and a
+`manifest.json`:
+
+```json
+{"unit":"seconds","sample_rate":24000,"lang":"en-us","speed":1.0,"voice":[["af_heart",1.0]],
+ "total_duration_seconds":12.4,"clips":[{"index":1,"file":"001.wav","text":"...","duration_seconds":6.1,"chunks":1}]}
+```
+
+`paragraph` splits on blank lines (line breaks inside a paragraph become
+spaces); `line` treats every non-empty line as a clip. Empty segments are
+skipped. `--split` cannot be combined with `--output`, `--timings-json` or
+`--save-style`. Existing clips need `--force`; clips left over from an earlier,
+longer run are not deleted, so treat `manifest.json` as the list of current
+clips. If any clip fails, nothing is published. To get one joined file, use the
+FFmpeg concat recipe below.
 
 ## Continuous prosody and timestamps
 

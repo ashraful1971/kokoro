@@ -37,6 +37,13 @@ class PortableBehaviorTests(LocalTest):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 speak.parse_blend(invalid)
 
+    def test_split_segments_by_paragraph_and_line(self):
+        text = "First step.\nstill first.\r\n\r\n\n  Second step.  \n\nThird."
+        self.assertEqual(speak.split_segments(text, "paragraph"),
+                         ["First step. still first.", "Second step.", "Third."])
+        self.assertEqual(speak.split_segments("A.\n\nB.\n  \nC.", "line"), ["A.", "B.", "C."])
+        self.assertEqual(speak.split_segments(" \n\n ", "paragraph"), [])
+
     def test_competing_output_is_not_overwritten(self):
         output = self.directory / "voice.wav"
         temporary = self.directory / "stage.part"
@@ -133,6 +140,36 @@ class OfflineSpeechTests(LocalTest):
         self.check_audio(path, result)
         self.assertGreater(result["chunks"], 2)
         self.assertGreater(result["duration_seconds"], 40)
+
+    def test_split_writes_clips_and_manifest_and_protects_existing(self):
+        source = self.directory / "steps.txt"
+        source.write_text("Open the terminal.\n\nRun the setup script.\nThen wait.\n\nDone.", encoding="utf-8")
+        clips = self.directory / "clips dir"
+        result = self.cli("--file", source, "--split", "paragraph", "--output-dir", clips)
+        self.assertEqual(result["clips"], 3)
+        manifest = json.loads((clips / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual([clip["file"] for clip in manifest["clips"]], ["001.wav", "002.wav", "003.wav"])
+        self.assertEqual(manifest["clips"][1]["text"], "Run the setup script. Then wait.")
+        for clip in manifest["clips"]:
+            path = clips / clip["file"]
+            self.check_audio(path, {"duration_seconds": clip["duration_seconds"]})
+        self.assertAlmostEqual(manifest["total_duration_seconds"],
+                               sum(clip["duration_seconds"] for clip in manifest["clips"]), places=2)
+        digest = common.sha256(clips / "001.wav")
+        error = self.cli("--file", source, "--split", "paragraph", "--output-dir", clips, success=False)
+        self.assertIn("--force", error)
+        self.assertEqual(common.sha256(clips / "001.wav"), digest)
+        lines = self.cli("--file", source, "--split", "line", "--output-dir", self.directory / "lines")
+        self.assertEqual(lines["clips"], 4)
+
+    def test_split_option_conflicts_fail_clearly(self):
+        for flags, expected in ((["--split", "line"], "requires --output-dir"),
+                                (["--output-dir", str(self.directory / "x")], "requires --split"),
+                                (["--split", "line", "--output-dir", str(self.directory / "x"),
+                                  "--output", str(self.directory / "x.wav")], "cannot be combined")):
+            with self.subTest(flags=flags):
+                self.assertIn(expected, self.cli("--text", "Hello", *flags, success=False))
+        self.assertFalse((self.directory / "x").exists())
 
     def test_british_stdin_speed_and_untrimmed_audio(self):
         path = self.directory / "british.wav"

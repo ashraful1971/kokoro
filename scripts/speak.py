@@ -8,6 +8,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -36,6 +37,11 @@ def parser_for_cli():
     voice = parser.add_mutually_exclusive_group()
     voice.add_argument("--voice", help="English voice ID or blend, e.g. af_heart:0.7,am_michael:0.3")
     voice.add_argument("--style", type=Path, help="Custom/blended voice style .npy (no pickle)")
+    parser.add_argument("--split", choices=("paragraph", "line"),
+                        help="Speak each paragraph (blank-line separated) or line as its own clip; "
+                             "needs --output-dir")
+    parser.add_argument("--output-dir", type=Path,
+                        help="Folder for --split clips (001.wav, 002.wav, ...) and manifest.json")
     parser.add_argument("--save-style", type=Path, help="Export chosen voice/blend to .npy")
     parser.add_argument("--speed", type=finite_number, default=1.0, help="0.5–2.0; default 1.0")
     parser.add_argument("--lang", choices=("en-us", "en-gb"), help="Pronunciation; inferred from first voice")
@@ -73,6 +79,16 @@ def parse_blend(expression):
     if not math.isfinite(total) or total <= 0:
         raise ValueError("Voice weights must have a positive finite sum")
     return [(name, weight / total) for name, weight in entries]
+
+
+def split_segments(text, mode):
+    """Return non-empty text segments, one per paragraph or per line."""
+    if mode == "line":
+        parts = text.splitlines()
+    else:
+        parts = re.split(r"\n\s*\n", text.replace("\r\n", "\n").replace("\r", "\n"))
+    segments = (" ".join(part.split()) for part in parts)
+    return [segment for segment in segments if segment]
 
 
 def destination(path, suffix, force):
@@ -150,6 +166,37 @@ def generate(engine, text, voice, args, temporary):
     return frames, chunks, timestamps
 
 
+def generate_clips(engine, segments, paths, manifest, voice, description, args):
+    """Render one WAV per segment, then publish the clips and finally manifest.json."""
+    staged, clips = [], []
+    try:
+        for index, (segment, path) in enumerate(zip(segments, paths), 1):
+            print(f"Clip {index}/{len(segments)}", file=sys.stderr)
+            temporary = temporary_for(path)
+            staged.append((temporary, path))
+            try:
+                frames, chunks, _ = generate(engine, segment, voice, args, temporary)
+            except ValueError as error:
+                raise ValueError(f"Clip {index} ({segment[:40]!r}): {error}") from error
+            clips.append({"index": index, "file": path.name, "text": segment,
+                          "duration_seconds": round(frames / 24000, 3), "chunks": chunks})
+        total = round(sum(clip["duration_seconds"] for clip in clips), 3)
+        temporary = temporary_for(manifest)
+        staged.append((temporary, manifest))
+        temporary.write_text(json.dumps(
+            {"unit": "seconds", "sample_rate": 24000, "lang": args.lang, "speed": args.speed,
+             "voice": description, "total_duration_seconds": total, "clips": clips},
+            ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        for temporary, target in staged:
+            publish(temporary, target, args.force)
+    finally:
+        for temporary, _ in staged:
+            temporary.unlink(missing_ok=True)
+    return {"output_dir": str(manifest.parent), "manifest": str(manifest), "clips": len(clips),
+            "total_duration_seconds": total, "sample_rate": 24000, "lang": args.lang,
+            "speed": args.speed, "voice": description}
+
+
 def run(args):
     import numpy as np
     import espeakng_loader
@@ -162,6 +209,13 @@ def run(args):
         raise ValueError("Speed must be between 0.5 and 2.0")
     if args.sentence_pause < 0 or args.clause_pause < 0:
         raise ValueError("Pauses must be nonnegative seconds")
+    if args.output_dir and not args.split:
+        raise ValueError("--output-dir requires --split")
+    if args.split:
+        if not args.output_dir:
+            raise ValueError("--split requires --output-dir")
+        if args.output or args.timings_json or args.save_style:
+            raise ValueError("--split cannot be combined with --output, --timings-json or --save-style")
     voices_path = args.voices_file or verify_asset("voices")
     # Read names/styles without loading the model, and never allow pickle data.
     with np.load(voices_path, allow_pickle=False) as bundle:
@@ -189,7 +243,7 @@ def run(args):
     outputs = []
     if args.output:
         outputs.append(destination(args.output, ".wav", args.force))
-    elif not args.save_style:
+    elif not args.save_style and not args.split:
         raise ValueError("--output is required for speech generation")
     style_output = destination(args.save_style, ".npy", args.force) if args.save_style else None
     timing_output = destination(args.timings_json, ".json", args.force) if args.timings_json else None
@@ -200,7 +254,7 @@ def run(args):
               (args.file, args.style, args.model, args.voices_file, args.vocab) if path]
     if any(path.resolve() in inputs for path in outputs):
         raise ValueError("An output path must not replace an input file")
-    if not args.output:
+    if not args.output and not args.split:
         if args.timings_json or args.continuous or args.text is not None or args.file:
             raise ValueError("Provide --output when supplying speech input or requesting timings")
         temporary = temporary_for(style_output)
@@ -212,7 +266,7 @@ def run(args):
             temporary.unlink(missing_ok=True)
         emit_json({"style": str(style_output), "shape": list(voice.shape)})
         return
-    output_path = outputs[0]
+    output_path = outputs[0] if args.output else None
     if args.text is not None:
         text = args.text
     elif args.file:
@@ -223,6 +277,15 @@ def run(args):
         raise ValueError("Supply --text, --file, or text on stdin")
     if not text.strip():
         raise ValueError("Input text is empty")
+    if args.split:
+        segments = split_segments(text, args.split)
+        width = max(3, len(str(len(segments))))
+        directory = args.output_dir.expanduser().absolute()
+        clip_paths = [destination(directory / f"{number:0{width}d}.wav", ".wav", args.force)
+                      for number in range(1, len(segments) + 1)]
+        manifest_path = destination(directory / "manifest.json", ".json", args.force)
+        if any(path.resolve() in inputs for path in (*clip_paths, manifest_path)):
+            raise ValueError("An output path must not replace an input file")
     model_path = args.model or verify_asset(args.model_variant)
     lib = str(args.espeak_library or espeakng_loader.get_library_path())
     data = str(args.espeak_data or espeakng_loader.get_data_path())
@@ -243,6 +306,10 @@ def run(args):
         unknown = set(text) - set(engine.tokenizer.vocab) - set("\r\n\t")
         if unknown:
             raise ValueError(f"Unsupported phoneme characters: {''.join(sorted(unknown))!r}")
+    if args.split:
+        description = str(args.style) if args.style else blend
+        emit_json(generate_clips(engine, segments, clip_paths, manifest_path, voice, description, args))
+        return
     staged = []
     try:
         temporary = temporary_for(output_path)

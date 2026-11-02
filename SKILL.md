@@ -26,6 +26,7 @@ Defaults: `af_heart`, normal speed, American pronunciation, trimmed silence, 24 
 - Pick a preset: `--voice bm_george`; British presets automatically select British pronunciation.
 - Blend voices: `--voice "af_heart:0.7,am_michael:0.3"`; weights are normalized.
 - Adjust speed with `--speed 0.9` (supported range 0.5–2.0).
+- Tutorials/videos needing one clip per step: `--split paragraph --output-dir /path/to/clips` (or `--split line`) speaks each blank-line-separated paragraph as `001.wav`, `002.wav`, … in a single model load, and writes `manifest.json` with each clip's text and duration. Prefer this over repeated single-clip commands.
 - Read [references/options.md](references/options.md) for all controls, custom styles, direct IPA input, pauses, continuous prosody, and phoneme timestamps.
 
 Respect a requested voice and output path. Otherwise use defaults without asking unnecessary questions. Use a fresh output filename when a file already exists; pass `--force` only when replacing it is intended. For multiple speakers, generate separate clips with their selected voices; blending creates one combined voice.
